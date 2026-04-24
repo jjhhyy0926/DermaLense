@@ -79,3 +79,13 @@ def load_all_raw(config: dict = None):
         val_cfg["hwahae"]["required_cols"]
     )
     return df_pc, df_coos, df_hwahae
+
+
+def load_ewg(raw_dir: str, filename: str, required_cols: list) -> pd.DataFrame:
+    """coos_성분정보.csv (EWG 스코어 원본) 로드"""
+    path = os.path.join(raw_dir, filename)
+    _check_file(path)
+    df = pd.read_csv(path, encoding="utf-8-sig")
+    _validate_schema(df, required_cols, "EWG")
+    logger.info(f"[EWG] 로드 완료: {df.shape}")
+    return df

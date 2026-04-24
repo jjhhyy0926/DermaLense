@@ -12,11 +12,13 @@ paths:
     paulaschoice: "paulaschoice_ingredients.csv"
     coos:         "coos_성분정보.csv"
     hwahae:       "hwahae_all.csv"
+    ewg:          "coos_성분정보.csv"
 
   output_files:
-    merged_json:  "ingredient_merged2.json"
-    product_db:   "product_db.csv"
-    chunk_prefix: "ingredient_chunks_preset"
+    merged_json:  "ingredient_merged2.json" # 3소스 병합 성분 DB
+    product_db:   "product_db.csv" # 화해 상품 정보 DB
+    chunk_prefix: "ingredient_chunks_preset" # 임베딩용 청크 (preset1~4)
+    ewg_csv:      "coos_ewg_cleaned.csv" # EWG 스코어 DB - coos 원본명
 
 # ── 검증 설정 ────────────────────────────────────────────────
 validation:
@@ -26,6 +28,8 @@ validation:
     required_cols: ["성분명", "INCI", "기능", "스코어"]
   hwahae:
     required_cols: ["korean", "english", "product_id", "product_name"]
+  ewg:
+    required_cols: ["성분명", "스코어"]   # ← 여기에 추가
 
 # ── 전처리 설정 ──────────────────────────────────────────────
 preprocessing:
@@ -114,6 +118,10 @@ preprocessing:
     보통:      3
     나쁨:      4
     매우 나쁨: 5
+
+  ewg:
+    ing_col:   "성분명"
+    score_col: "스코어"
 
 # ── product_db 컬럼 설정 ─────────────────────────────────────
 product_db:

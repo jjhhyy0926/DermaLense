@@ -57,3 +57,19 @@ def build_product_db(df_hwahae_raw: pd.DataFrame,
     df = df.rename(columns=product_cfg["rename_cols"])
     logger.info(f"[product_db] 생성 완료: {df.shape}")
     return df
+
+
+def merge_ewg_scores(df: pd.DataFrame, ing_col: str) -> pd.DataFrame:
+    """중복 성분명 병합 — 0 아닌 유효값 우선, 없으면 0"""
+    merged_rows = []
+    for key, group in df.groupby("ingredient_key"):
+        valid_scores = [s for s in group["score_parsed"].tolist() if s != 0]
+        score = valid_scores[0] if valid_scores else 0
+        representative = group[ing_col].astype(str).str.strip().value_counts().idxmax()
+        merged_rows.append({
+            "ingredient": representative,
+            "coos_score": int(score),
+        })
+    result = pd.DataFrame(merged_rows).sort_values("ingredient").reset_index(drop=True)
+    logger.info(f"[EWG merge] 병합 후: {result.shape}")
+    return result

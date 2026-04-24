@@ -5,6 +5,7 @@
 
 import os
 import sys
+import re
 
 _HERE   = os.path.dirname(os.path.abspath(__file__))
 _COMMON = os.path.join(_HERE, "..", "..", "00_common")
@@ -76,4 +77,38 @@ def apply_score_mapping(df: pd.DataFrame, pre_cfg: dict) -> pd.DataFrame:
             lambda v: _map_pc_rating(v, pre_cfg["pc_rating_map"])
         )
     logger.info("[스코어 변환] 완료")
+    return df
+
+
+def parse_ewg_score(raw) -> int:
+    """EWG 스코어 파싱 (범위 → 끝값, 없으면 0)"""
+    if raw is None:
+        return 0
+    raw_str = str(raw).strip()
+    if raw_str in ("", "nan", "None", "N/A", "-"):
+        return 0
+    cleaned = re.sub(r"[^\d\-–]", " ", raw_str).strip()
+    cleaned = re.sub(r"\s+", " ", cleaned).strip()
+    range_match = re.match(r"^(\d+)\s*[-–]\s*(\d+)$", cleaned)
+    if range_match:
+        return int(range_match.group(2))
+    single_match = re.match(r"^(\d+)$", cleaned)
+    if single_match:
+        return int(single_match.group(1))
+    numbers = re.findall(r"\d+", cleaned)
+    if numbers:
+        return int(numbers[-1])
+    return 0
+
+
+def clean_ewg(df: pd.DataFrame, ing_col: str, score_col: str) -> pd.DataFrame:
+    """EWG 원본 → score_parsed + ingredient_key 컬럼 생성, 빈 성분명 제거"""
+    df = df.copy()
+    df["score_parsed"] = df[score_col].apply(parse_ewg_score)
+    df = df[
+        df[ing_col].notna() &
+        (df[ing_col].astype(str).str.strip() != "")
+    ].copy()
+    df["ingredient_key"] = df[ing_col].astype(str).str.strip().str.lower()
+    logger.info(f"[EWG cleaner] 완료: {df.shape}")
     return df
