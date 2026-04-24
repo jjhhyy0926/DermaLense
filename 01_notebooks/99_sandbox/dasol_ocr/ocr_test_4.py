@@ -4,17 +4,13 @@ import pandas as pd
 from dotenv import load_dotenv
 from paddleocr import PaddleOCR
 from rapidfuzz import process, fuzz
-import cv2
-import numpy as np
 
 load_dotenv()
-from langchain_community.vectorstores import FAISS
-from langchain_openai import OpenAIEmbeddings
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 
 # ─────────────────────────────────────────
-# 1-1. coos_ewg_cleaned.csv (1차: 정확/퍼지 매칭)
+# 1. coos_ewg_cleaned.csv 성분 매칭
 # ─────────────────────────────────────────
 _CSV_PATH = os.path.abspath(os.path.join(_HERE, "..", "..", "..", "00_data", "02_processed", "coos_ewg_cleaned.csv"))
 _df = pd.read_csv(_CSV_PATH, encoding="utf-8-sig")
@@ -26,25 +22,20 @@ ko_map   = {
 ko_names = list(ko_map.keys())
 
 # ─────────────────────────────────────────
-# 1-2. FAISS preset2_v2 (2차: 의미 기반 fallback)
+# 2. OCR 초기화 (PaddleOCR) — 지연 초기화
 # ─────────────────────────────────────────
-FAISS_PATH       = os.path.join(_HERE, "..", "faiss_index_preset2_v2")
-_embedding_model = OpenAIEmbeddings(model="text-embedding-ada-002")
-vectorstore = FAISS.load_local(
-    FAISS_PATH,
-    embeddings=_embedding_model,
-    allow_dangerous_deserialization=True,
-)
+_ocr = None
 
-# ─────────────────────────────────────────
-# 2. OCR 초기화 (PaddleOCR)
-# ─────────────────────────────────────────
-ocr = PaddleOCR(
-    use_doc_orientation_classify=False,
-    use_doc_unwarping=False,
-    use_textline_orientation=False,
-    lang='korean',
-)
+def _get_ocr() -> PaddleOCR:
+    global _ocr
+    if _ocr is None:
+        _ocr = PaddleOCR(
+            use_doc_orientation_classify=False,
+            use_doc_unwarping=False,
+            use_textline_orientation=False,
+            lang='korean',
+        )
+    return _ocr
 
 # ─────────────────────────────────────────
 # 이미지 전처리
@@ -214,7 +205,7 @@ def extract_text_with_paddle(image_input) -> str:
         img.save(tmp_path, "JPEG")
 
     try:
-        result = ocr.predict(input=tmp_path)
+        result = _get_ocr().predict(input=tmp_path)
     finally:
         import os
         os.unlink(tmp_path)

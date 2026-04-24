@@ -17,6 +17,7 @@ cohere>=5.0.0
 rapidfuzz>=3.0.0
 
 # OCR
+paddlepaddle>=3.0.0
 paddleocr>=2.9.0
 opencv-python>=4.8.0
 easyocr>=1.7.1
