@@ -10,15 +10,11 @@
   - pc_rating     : 정수  0=결측, 1=훌륭함, 2=좋음, 3=보통, 4=나쁨, 5=매우나쁨
 
 최종점수 공식:
-  rerank_score = search_score × chunk_weight × source_weight × domain_weight
+  rerank_score = search_score × chunk_weight × source_weight
 
   chunk_weight  : preset별 비율 (config.yaml weight_presets 기반)
-  source_weight : 데이터 출처 기반 (coos×1.8, hwahae×1.5, paula×1.3)
-  domain_weight : 도메인 점수 [-3, 2] → [0.5, 1.5] 선형 변환
-
-도메인 점수:
-  Final Score = Q_coos × coos수치 + Q_hwahae × WoE_hwahae + Q_paula × WoE_paula
-  Q_coos=0.3419 / Q_hwahae=0.4989 / Q_paula=0.5011  (결측 시 재정규화)
+  source_weight : 데이터 출처 신뢰도 기반 (coos×1.8, hwahae×1.5, paula×1.3)
+                  여러 출처가 있으면 평균값 사용. 결측 시 1.0(중립)
 """
 
 from __future__ import annotations
@@ -59,12 +55,20 @@ SOURCE_WEIGHT_DEFAULT = 1.0   # 출처 없을 때 중립
 def compute_source_weight(used_sources: list[str]) -> float:
     """
     used_sources 리스트 기반 source_weight 계산.
-    여러 출처가 있으면 평균값 사용.
+    Q값으로 가중 평균 적용 (결측 출처는 자동 제외).
+
+    Q_COOS=0.3419 / Q_HWAHAE=0.4989 / Q_PAULA=0.5011
     """
     if not used_sources:
         return SOURCE_WEIGHT_DEFAULT
-    weights = [SOURCE_WEIGHT_MAP.get(s, SOURCE_WEIGHT_DEFAULT) for s in used_sources]
-    return round(sum(weights) / len(weights), 4)
+
+    Q_MAP = {"coos": Q_COOS, "hwahae": Q_HWAHAE, "paula": Q_PAULA}
+    weighted_sum = sum(
+        SOURCE_WEIGHT_MAP.get(s, SOURCE_WEIGHT_DEFAULT) * Q_MAP.get(s, 1.0)
+        for s in used_sources
+    )
+    total_q = sum(Q_MAP.get(s, 1.0) for s in used_sources)
+    return round(weighted_sum / total_q, 4)
 
 
 # ──────────────────────────────────────────────
@@ -79,15 +83,14 @@ COOS_SCORE_MAP: dict[int, float] = {
     3: -3.0,   # 위험
 }
 
-# 화해 EWG 정수값 → WoE
-# 0=결측, 1~3=Good, 4~10=Others
+# 화해 EWG → WoE
 WOE_HWAHAE: dict[str, float] = {
     "Good":   0.3715,
     "Others": -2.5706,
 }
 
 # pc_rating 정수값 → WoE 매핑
-# 0=결측, 1=훌륭함, 2=좋음, 3=보통, 4=나쁨, 5=매우나쁨
+# 0=결측, 1=훌륭함 ~ 5=매우나쁨
 WOE_PAULA: dict[int, float] = {
     1:  0.5081,   # 훌륭함
     2:  0.2313,   # 좋음
@@ -96,12 +99,10 @@ WOE_PAULA: dict[int, float] = {
     5: -1.5810,   # 매우나쁨
 }
 
+# Q값 (전체 3개 사이트 기준 / 화해+paula 재정규화)
 Q_COOS   = 0.3419
 Q_HWAHAE = 0.4989
 Q_PAULA  = 0.5011
-
-_DOMAIN_MIN = -3.0
-_DOMAIN_MAX =  2.0
 
 
 def _get_hwahae_grade(ewg_val: Any) -> str | None:
@@ -117,23 +118,30 @@ def _get_hwahae_grade(ewg_val: Any) -> str | None:
     return "Good" if val <= 3 else "Others"
 
 
-def compute_domain_score(
+def compute_final_score(
     coos_score: Any,
     hw_ewg: Any,
     pc_rating: Any,
 ) -> tuple[float | None, list[str]]:
     """
-    도메인 점수 계산. 결측 출처는 Q값 재정규화로 처리.
+    Final Score = Q_coos × coos수치 + Q_hwahae × WoE_hwahae + Q_paula × WoE_paula
+    결측 출처는 Q값 재정규화로 처리.
+
+    Parameters
+    ----------
+    coos_score : 정수  0=결측, 1=안전, 2=주의, 3=위험
+    hw_ewg     : 정수  0=결측, 1~3=Good, 4~10=Others
+    pc_rating  : 정수  0=결측, 1=훌륭함 ~ 5=매우나쁨
 
     Returns
     -------
-    (domain_score, used_sources)
+    (final_score, used_sources)
     """
     scores:  list[float] = []
     weights: list[float] = []
     sources: list[str]   = []
 
-    # coos_score: 정수 0=결측, 1=안전, 2=주의, 3=위험
+    # coos
     try:
         coos_int = int(coos_score) if coos_score is not None else 0
     except (ValueError, TypeError):
@@ -143,14 +151,14 @@ def compute_domain_score(
         weights.append(Q_COOS)
         sources.append("coos")
 
-    # hw_ewg: 정수 0=결측, 1~3=Good, 4~10=Others
+    # 화해
     hw_grade = _get_hwahae_grade(hw_ewg)
     if hw_grade and hw_grade in WOE_HWAHAE:
         scores.append(WOE_HWAHAE[hw_grade])
         weights.append(Q_HWAHAE)
         sources.append("hwahae")
 
-    # pc_rating: 정수 0=결측, 1=훌륭함 ~ 5=매우나쁨
+    # paula
     try:
         pc_int = int(pc_rating) if pc_rating is not None else 0
     except (ValueError, TypeError):
@@ -163,23 +171,12 @@ def compute_domain_score(
     if not scores:
         return None, []
 
+    # 결측 시 Q값 재정규화
     total_w      = sum(weights)
     norm_weights = [w / total_w for w in weights]
-    domain_score = sum(s * w for s, w in zip(scores, norm_weights))
-    return round(domain_score, 4), sources
+    final_score  = sum(s * w for s, w in zip(scores, norm_weights))
+    return round(final_score, 4), sources
 
-
-def domain_score_to_weight(
-    domain_score: float | None,
-    w_min: float = 0.5,
-    w_max: float = 1.5,
-) -> float:
-    """도메인 점수 [-3, 2] → domain_weight [w_min, w_max] 선형 변환."""
-    if domain_score is None:
-        return 1.0
-    clipped = max(_DOMAIN_MIN, min(_DOMAIN_MAX, domain_score))
-    ratio   = (clipped - _DOMAIN_MIN) / (_DOMAIN_MAX - _DOMAIN_MIN)
-    return w_min + ratio * (w_max - w_min)
 
 
 # ──────────────────────────────────────────────
@@ -194,8 +191,6 @@ class RankedChunk:
     original_score: float
     chunk_weight:   float = 1.0
     source_weight:  float = 1.0
-    domain_weight:  float = 1.0
-    domain_score:   float | None = None
     used_sources:   list[str] = field(default_factory=list)
     final_score:    float = field(init=False)
 
@@ -204,7 +199,6 @@ class RankedChunk:
             self.original_score
             * self.chunk_weight
             * self.source_weight
-            * self.domain_weight
         )
 
     def recompute(self) -> None:
@@ -212,7 +206,6 @@ class RankedChunk:
             self.original_score
             * self.chunk_weight
             * self.source_weight
-            * self.domain_weight
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -222,8 +215,6 @@ class RankedChunk:
             "original_score": self.original_score,
             "chunk_weight":   self.chunk_weight,
             "source_weight":  self.source_weight,
-            "domain_score":   self.domain_score,
-            "domain_weight":  self.domain_weight,
             "used_sources":   self.used_sources,
             "final_score":    self.final_score,
         }
@@ -260,8 +251,6 @@ def rerank(
     top_k: int = 5,
     deduplicate: bool = True,
     similarity_threshold: float = 0.85,
-    domain_w_min: float = 0.5,
-    domain_w_max: float = 1.5,
     custom_chunk_weights: dict[str, float] | None = None,
 ) -> list[RankedChunk]:
     """
@@ -295,15 +284,12 @@ def rerank(
             chunk_type = (metadata.get("chunk_type") or "unknown").lower()
             cw = c_map.get(chunk_type, 0.33)
 
-            # ── domain_weight ────────────────────
+            # ── source_weight ────────────────────
             coos_score = metadata.get("coos_score")
             hw_ewg     = metadata.get("hw_ewg")
             pc_rating  = metadata.get("pc_rating")
 
-            ds, used = compute_domain_score(coos_score, hw_ewg, pc_rating)
-            dw = domain_score_to_weight(ds, domain_w_min, domain_w_max)
-
-            # ── source_weight ────────────────────
+            _, used = compute_final_score(coos_score, hw_ewg, pc_rating)
             sw = compute_source_weight(used)
 
             chunk = RankedChunk(
@@ -312,18 +298,15 @@ def rerank(
                 original_score=original_score,
                 chunk_weight=cw,
                 source_weight=sw,
-                domain_weight=dw,
-                domain_score=ds,
                 used_sources=used,
             )
             ranked.append(chunk)
             logger.debug(
-                "[%d] %s | orig=%.4f cw=%.2f sw=%.2f ds=%s dw=%.2f → final=%.4f",
+                "[%d] %s | orig=%.4f cw=%.2f sw=%.2f → final=%.4f  출처=%s",
                 idx,
                 metadata.get("ingredient_ko", "?"),
-                original_score, cw, sw,
-                f"{ds:.4f}" if ds is not None else "None",
-                dw, chunk.final_score,
+                original_score, cw, sw, chunk.final_score,
+                "+".join(used) if used else "-",
             )
 
         except (KeyError, TypeError, ValueError) as e:
@@ -348,18 +331,16 @@ def rerank(
 def print_rerank_table(chunks: list[RankedChunk]) -> None:
     header = (
         f"{'순위':<4} {'성분명':<20} {'orig':>7} {'cw':>5} "
-        f"{'sw':>5} {'ds':>7} {'dw':>5} {'final':>8}  출처"
+        f"{'sw':>5} {'final':>8}  출처"
     )
     print(header)
     print("─" * len(header))
     for i, c in enumerate(chunks, 1):
-        ds_str  = f"{c.domain_score:.4f}" if c.domain_score is not None else "   None"
         name    = c.metadata.get("ingredient_ko", "?")[:18]
         sources = "+".join(c.used_sources) if c.used_sources else "-"
         print(
             f"{i:<4} {name:<20} {c.original_score:>7.4f} {c.chunk_weight:>5.2f} "
-            f"{c.source_weight:>5.2f} {ds_str:>7} {c.domain_weight:>5.2f} "
-            f"{c.final_score:>8.4f}  {sources}"
+            f"{c.source_weight:>5.2f} {c.final_score:>8.4f}  {sources}"
         )
 
 

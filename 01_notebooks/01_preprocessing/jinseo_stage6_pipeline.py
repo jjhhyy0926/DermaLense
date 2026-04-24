@@ -53,9 +53,9 @@ def convert_to_stage6_input(response: Any) -> list[dict[str, Any]]:
     """
     return [
         {
-            "content": r.document.page_content,
+            "content":  r.document.page_content,
             "metadata": r.document.metadata,
-            "score": r.score,
+            "score":    r.score,
         }
         for r in response.results
     ]
@@ -73,8 +73,6 @@ class Stage6Config:
     rerank_top_k: int = 5
     deduplicate: bool = True
     similarity_threshold: float = 0.85
-    domain_w_min: float = 0.5
-    domain_w_max: float = 1.5
     custom_chunk_weights: dict[str, float] | None = None
 
     # 압축
@@ -100,23 +98,23 @@ class Stage6Config:
 @dataclass
 class Stage6Result:
     """6단계 파이프라인 최종 결과."""
-    query: str
-    search_method: str                       # bm25 / dense / rrf / hyde
-    reranked_chunks: list[RankedChunk]
+    query:             str
+    search_method:     str                       # bm25 / dense / rrf / hyde
+    reranked_chunks:   list[RankedChunk]
     compressed_chunks: list[CompressedChunk]
-    final_prompt: list[dict[str, str]]
-    answer: str
-    elapsed_sec: float
+    final_prompt:      list[dict[str, str]]
+    answer:            str
+    elapsed_sec:       float
 
     def summary(self) -> str:
         lines = [
             "=" * 60,
-            f"  6단계 파이프라인 결과 [{self.search_method.upper()}]",
+            f"  6단계 파이프라인 결과  [{self.search_method.upper()}]",
             "=" * 60,
-            f"  질문 : {self.query}",
+            f"  질문   : {self.query}",
             f"  재정렬 : {len(self.reranked_chunks)}개",
-            f"  압축 : {len(self.compressed_chunks)}개",
-            f"  소요 : {self.elapsed_sec:.2f}초",
+            f"  압축   : {len(self.compressed_chunks)}개",
+            f"  소요   : {self.elapsed_sec:.2f}초",
             "-" * 60,
             "  [최종 답변]",
             self.answer,
@@ -126,13 +124,13 @@ class Stage6Result:
 
     def to_dict(self) -> dict[str, Any]:
         return {
-            "query": self.query,
-            "search_method": self.search_method,
-            "reranked_chunks": [c.to_dict() for c in self.reranked_chunks],
+            "query":             self.query,
+            "search_method":     self.search_method,
+            "reranked_chunks":   [c.to_dict() for c in self.reranked_chunks],
             "compressed_chunks": [c.to_dict() for c in self.compressed_chunks],
-            "final_prompt": self.final_prompt,
-            "answer": self.answer,
-            "elapsed_sec": self.elapsed_sec,
+            "final_prompt":      self.final_prompt,
+            "answer":            self.answer,
+            "elapsed_sec":       self.elapsed_sec,
         }
 
 
@@ -153,16 +151,16 @@ def run_stage6(
 
     Parameters
     ----------
-    query : 사용자 질문
+    query          : 사용자 질문
     search_results : convert_to_stage6_input() 결과
-    search_method : 사용된 검색 방법 레이블 (기록용)
-    client : OpenAI 클라이언트 (None이면 자동 생성)
-    config : Stage6Config (None이면 기본값)
-    verbose : True이면 각 단계 중간 결과 출력
+    search_method  : 사용된 검색 방법 레이블 (기록용)
+    client         : OpenAI 클라이언트 (None이면 자동 생성)
+    config         : Stage6Config (None이면 기본값)
+    verbose        : True이면 각 단계 중간 결과 출력
     """
-    cfg = config or Stage6Config()
+    cfg    = config or Stage6Config()
     client = client or OpenAI()
-    t0 = time.perf_counter()
+    t0     = time.perf_counter()
 
     # ── 6-1 / 6-2: 이중 가중치 재정렬 ──────────
     logger.info("[6-1/6-2] 재정렬 시작 (입력 %d개)", len(search_results))
@@ -171,8 +169,6 @@ def run_stage6(
         top_k=cfg.rerank_top_k,
         deduplicate=cfg.deduplicate,
         similarity_threshold=cfg.similarity_threshold,
-        domain_w_min=cfg.domain_w_min,
-        domain_w_max=cfg.domain_w_max,
         custom_chunk_weights=cfg.custom_chunk_weights,
     )
 
